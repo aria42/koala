@@ -1,11 +1,12 @@
 (ns koala.dataframe
   (:require
-   [clojure.data.csv :as csv]
    [clojure.java.io :as io]
    [koala.series :as series]
    [koala.util :as util]
    [plumbing.core :refer [map-from-keys map-vals]])
   (:import
+   (org.simpleflatmapper.csv
+    CsvParser)
    (it.unimi.dsi.fastutil.doubles
     DoubleArrayList)
    (it.unimi.dsi.fastutil.longs
@@ -14,11 +15,13 @@
     ObjectArrayList)
    (java.util Iterator)))
 
+(set! *warn-on-reflection* true)
+
 (deftype Dataframe [column->series ordered-columns]
 
   clojure.lang.Seqable
   (seq [_]
-    (let [iters (map #(.iterator (column->series %)) ordered-columns)]
+    (let [iters (map #(.iterator ^Iterable (column->series %)) ordered-columns)]
       (iterator-seq
        (reify Iterator
          (hasNext [_]
@@ -67,10 +70,10 @@
       0)))
 
 (defmethod print-method Dataframe [df ^java.io.Writer w]
-  (let [^DataFrame df df])
-  (.write w (format "#Dataframe{ cols: %s, count: %d}"
-                    (vec (.ordered-columns df))
-                    (count df))))
+  (let [^Dataframe df df]
+    (.write w (format "#Dataframe{ cols: %s, count: %d}"
+                      (vec (.ordered_columns df))
+                      (count df)))))
 
 (defn make [data
             & {:keys [index, dtype]
@@ -97,7 +100,7 @@
         num-headers (count header)]
     (loop [tail tail header->column header->column]
       (if-let [row (first tail)]
-        (let [pairs (mapv util/->Pair header row)]
+        (let [pairs (map util/->Pair header row)]
           (when-not (= num-headers (count pairs))
             (throw (ex-info "Row has wrong number of elements"
                             {:header header :row row})))
@@ -110,15 +113,38 @@
              pairs))))
         (map-vals persistent! header->column)))))
 
+(def ^:private ^:const
+  +strings+
+  (class (into-array String [])))
 
 (defn from-csv
   [source &
    {:keys [column-fn]
     :or   {column-fn identity}}]
-  (with-open [f (io/reader source)]
-    (let [[headers & tail] (csv/read-csv f)
-          headers (map column-fn headers)
-          header->vals (read-raw-columns headers tail)]
-      (Dataframe.
-       (map-vals series/make header->vals)
-       headers))))
+  (let [it (CsvParser/iterator (io/reader source))
+        headers (object-array (map column-fn (.next it)))
+        n (count headers)
+        header->vals (map-from-keys
+                      (fn [_] (java.util.ArrayList. n))
+                      headers)]
+    (loop []
+      (when (.hasNext it)
+        (let [row (.next it)]
+          (dotimes [idx n]
+            (let [h (aget ^objects headers idx)
+                  ^java.util.List vals (header->vals h)]
+              (.add vals (aget ^objects row idx))))
+          (recur))))
+    (Dataframe.
+     (map-vals series/make header->vals)
+     headers)))
+
+
+(defn as-numeric [^Dataframe df cols]
+  (Dataframe.
+   (reduce
+    (fn [m c]
+      (update m c series/as-numeric))
+    (.column->series df)
+    cols)
+   (.ordered-columns df)))

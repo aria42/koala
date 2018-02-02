@@ -55,8 +55,8 @@
   (iterator [this]
     (.iterator ^Iterable vals))
 
-  Series
-  (dtype [this] dtype)
+  InternalSeries
+  (-dtype [this] dtype)
 
   Indexed
   (nth [_ idx]
@@ -110,7 +110,7 @@
   (case dtype
     :double (double-array vals)
     :long (long-array vals)
-    :object (into [] vals)))
+    :object vals))
 
 
 (defn guess-dtype [vals]
@@ -147,21 +147,13 @@
     (FullSeries.
      (.key->index ^FullSeries s)
      (case dtype
-       :double (double-array (map #(Double/parseDouble (str %)) s))
-       :long (long-array (map #(Long/parseLong (str %)) s))
+       :double (double-array (clojure.core/map #(Double/parseDouble (str %)) s))
+       :long (long-array (clojure.core/map #(Long/parseLong (str %)) s))
        (throw (ex-info "Couldn't parse series as numeric" {:series s})))
      dtype)))
 
 (defn make [data & {:keys [dtype, index]}]
   (cond
-    ;; flat sequence has no index
-    (every? #(or (number? %) (string? %)) data)
-    (let [dtype (or dtype :object)]
-      (FullSeries.
-       (when index (coerce-index index))
-       (coerce-vals dtype data)
-       dtype))
-
     ;; single object with index keys
     ;; will impose an ordering by sorting keys
     (s/valid? ::obj-series data)
@@ -172,6 +164,15 @@
        (coerce-index sorted-keys)
        (coerce-vals dtype (clojure.core/map data sorted-keys))
        dtype))
+
+    ;; flat sequence has no index
+    (seqable? data)
+    (let [dtype (or dtype :object)]
+      (FullSeries.
+       (when index (coerce-index index))
+       (coerce-vals dtype data)
+       dtype))
+
 
     :else
     (throw (ex-info "Can't make data from data" {:data data}))))
@@ -197,7 +198,9 @@
      (case dtype
          :long (Arrays/copyOfRange ^longs (.vals series) (int start) (int stop))
          :double (Arrays/copyOfRange ^doubles (.vals series) (int start) (int stop))
-         :object (vec (subvec (.vals series) start stop)))
+         :object (if (vector? (.vals series))
+                   (vec (subvec (.vals series) start stop))
+                   (vec (subvec (vec (.vals series)) start stop))))
      :dtype dtype
      :index (mapv i->k (clojure.core/range start stop)))))
 
