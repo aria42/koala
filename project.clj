@@ -6,4 +6,5 @@
   :dependencies [[org.clojure/clojure "1.9.0"]
                  [it.unimi.dsi/fastutil "8.1.0"]
                  [prismatic/plumbing "0.5.5"]
+                 [org.apache.commons/commons-lang3 "3.7"]
                  [org.clojure/data.csv "0.1.4"]])

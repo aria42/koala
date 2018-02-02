@@ -35,17 +35,42 @@
                         (conj! result [c (.next ^Iterator it)])))
                (persistent! result))))))))
 
+  clojure.lang.Associative
+  (containsKey [_ k]
+    (.containsKey ^clojure.lang.Associative column->series k))
+  (entryAt [_ k]
+    (.entryAt ^clojure.lang.Associative column->series k))
+  (assoc [this k v]
+    (when-not (= (count this) (count v))
+      (throw (ex-info "New column doesn't match length"
+                      {:new-column (count v)
+                       :existing-columns (count this)})))
+    (Dataframe.
+     (assoc column->series k (series/make v))
+     (conj ordered-columns k)))
+
   clojure.lang.ILookup
   (valAt [_ k]
     (get column->series k))
   (valAt [_ k nf]
     (get column->series k nf))
 
+  clojure.lang.Indexed
+  (nth [_ idx]
+    (->> ordered-columns
+         (mapv (fn [c] (util/->Pair c (nth (column->series c) idx))))))
+
   clojure.lang.Counted
   (count [_]
     (if-let [s (-> column->series vals first)]
       (count s)
       0)))
+
+(defmethod print-method Dataframe [df ^java.io.Writer w]
+  (let [^DataFrame df df])
+  (.write w (format "#Dataframe{ cols: %s, count: %d}"
+                    (vec (.ordered-columns df))
+                    (count df))))
 
 (defn make [data
             & {:keys [index, dtype]
@@ -68,24 +93,23 @@
        ))))
 
 (defn- read-raw-columns [header tail]
-  (let [header->column (map-from-keys (fn [_] (transient [])) header)]
+  (let [header->column (map-from-keys (fn [_] (transient [])) header)
+        num-headers (count header)]
     (loop [tail tail header->column header->column]
       (if-let [row (first tail)]
-        (let [pairs (map util/->Pair header row)]
-          (when (not= (count header) (count row))
+        (let [pairs (mapv util/->Pair header row)]
+          (when-not (= num-headers (count pairs))
             (throw (ex-info "Row has wrong number of elements"
                             {:header header :row row})))
           (recur
            (next tail)
-           (reduce
-            (fn [res [h r]]
-              (update res h conj! r))
-            header->column
-            pairs )))
+           (persistent! (reduce
+             (fn [res [h r]]
+               (assoc! res h (conj! (res h) r)))
+             (transient header->column)
+             pairs))))
         (map-vals persistent! header->column)))))
 
-(defn- vals->series [vals]
-  (series/make vals :dtype :object))
 
 (defn from-csv
   [source &
@@ -96,5 +120,5 @@
           headers (map column-fn headers)
           header->vals (read-raw-columns headers tail)]
       (Dataframe.
-       (map-vals vals->series header->vals)
+       (map-vals series/make header->vals)
        headers))))

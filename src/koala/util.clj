@@ -31,3 +31,7 @@
   Seqable
   (seq [_]
     (list x1 x2)))
+
+
+(defmethod print-method Pair [p ^java.io.Writer w]
+  (.write w (pr-str [(first p) (second p)])))
