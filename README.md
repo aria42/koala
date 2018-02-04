@@ -120,6 +120,12 @@ If you want to transform each value of the column to update, the function can `m
 
 You can use convert a dataframe to a HTML table for pretty display for Notebook environments, including [Clojupyter](https://github.com/clojupyter/clojupyter), using `df/->html` which will return a [hiccup](https://github.com/weavejester/hiccup) data-structure.
 
+## TODO
+
+* Add more ways to specify, or guess, primitive columns (specially from CSV)
+* Provide more series functions for standard numerical operations (currently only unit-normalizing)
+* Provide a lazy view on CSV reads
+
 ## License
 
 Copyright © 2018 aria42 Inc.
