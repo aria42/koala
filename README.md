@@ -2,6 +2,8 @@
 
 A clojure dataframe library, meant to replicate some of what [pandas](https://pandas.pydata.org/) does for python. The library is **extremely alpha** at the moment.
 
+While early, the out-of-the-box performance is pretty reasonable. For example, for [this CSV](https://data.consumerfinance.gov/api/views/s6ew-h6mp/rows.csv?accessType=DOWNLOAD) file from Data.gov with over 950k rows (and about 500 MB uncompressed) in about 6 seconds (assuming you've got enough JVM memory allocated to accomodate this data). 
+
 ## Usage
 
 In addition to this README, check out the `dataframe_test` test for more examples in action.
