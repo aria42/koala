@@ -1,10 +1,17 @@
 (ns koala.dataframe
+  (:refer-clojure :exclude [filter map range])
   (:require
    [clojure.java.io :as io]
    [koala.series :as series]
    [koala.util :as util]
    [plumbing.core :refer [map-from-keys map-vals]])
   (:import
+   (clojure.lang
+    Associative
+    Counted
+    ILookup
+    Indexed
+    Seqable)
    (org.simpleflatmapper.csv
     CsvParser)
    (it.unimi.dsi.fastutil.doubles
@@ -15,55 +22,62 @@
     ObjectArrayList)
    (java.util Iterator)))
 
-(set! *warn-on-reflection* true)
 
 (deftype Dataframe [column->series ordered-columns]
 
-  clojure.lang.Seqable
-  (seq [_]
-    (let [iters (map #(.iterator ^Iterable (column->series %)) ordered-columns)]
-      (iterator-seq
-       (reify Iterator
-         (hasNext [_]
-           (.hasNext ^Iterator (first iters)))
-         (next [_]
-           ;; code hot-spot, pay attention to perf
-           (loop [cols ordered-columns
-                  iters iters
-                  result (transient [])]
-             (if-let [c (first cols)]
-               (let [it (first iters)]
-                 (recur (next cols)
-                        (next iters)
-                        (conj! result [c (.next ^Iterator it)])))
-               (persistent! result))))))))
+  Seqable
+  (seq [this]
+    (iterator-seq (.iterator ^Iterable this)))
 
-  clojure.lang.Associative
+  Associative
   (containsKey [_ k]
     (.containsKey ^clojure.lang.Associative column->series k))
   (entryAt [_ k]
     (.entryAt ^clojure.lang.Associative column->series k))
   (assoc [this k v]
-    (when-not (= (count this) (count v))
-      (throw (ex-info "New column doesn't match length"
-                      {:new-column (count v)
-                       :existing-columns (count this)})))
-    (Dataframe.
-     (assoc column->series k (series/make v))
-     (conj ordered-columns k)))
+    (if (instance? Counted v)
+      (when (= (count this) (count v))
+        (throw (ex-info "New series data doesn't match data-frame length"
+                        {:new-column (count v)
+                         :existing-columns (count this)})))
+      (when-not (fn? v)
+        (throw (ex-info "assoc only takes fn or data for series/make"
+                        {:value v}))))
+    (let [v (if (fn? v)
+              (clojure.core/map (fn [row] (v (into {} row))) (seq this))
+              v)]
+      (Dataframe.
+       (assoc column->series k (series/make v))
+       (conj ordered-columns k))))
 
-  clojure.lang.ILookup
+  ILookup
   (valAt [_ k]
     (get column->series k))
   (valAt [_ k nf]
     (get column->series k nf))
 
-  clojure.lang.Indexed
+  Indexed
   (nth [_ idx]
     (->> ordered-columns
          (mapv (fn [c] (util/->Pair c (nth (column->series c) idx))))))
 
-  clojure.lang.Counted
+  Iterable
+  (iterator [_]
+    (let [iters (mapv #(.iterator ^Iterable (column->series %)) ordered-columns)
+          cols (into [] ordered-columns)
+          n (count iters)]
+      (reify Iterator
+        (hasNext [_]
+          (.hasNext ^Iterator (first iters)))
+        (next [_]
+          (let [result (java.util.ArrayList. n)]
+            (dotimes [idx n]
+              (let [col (nth cols idx)
+                    ^Iterator iter (nth iters idx)]
+                (.add result (util/->Pair col (.next iter)))))
+            result)))))
+
+  Counted
   (count [_]
     (if-let [s (-> column->series vals first)]
       (count s)
@@ -84,23 +98,59 @@
     (Dataframe. (map-vals series/make data) nil)
 
     (or (seq? data) (vector? data))
-    (let [columns (sort (set (mapcat keys data)))]
+    (let [columns (vec (sort (set (mapcat keys data))))]
       (Dataframe.
-       (map-vals
+       (map-from-keys
         (fn [k]
           (series/make
-           (map #(get % k) data)
-           :index))
+           (clojure.core/map #(get % k) data)))
         columns)
        columns
        ))))
+
+(defn filter
+  [pred ^Dataframe df]
+  (let [cols (.ordered-columns df)
+        n (count cols)
+        header->vals (map-from-keys
+                      (fn [_] (java.util.ArrayList. n))
+                      cols)
+        it (.iterator df)]
+    (loop []
+      (when (.hasNext it)
+        (let [row (.next it)]
+          (when (pred (into {} row))
+              (doseq [[k v] row]
+                (.add ^java.util.List (header->vals k) v)))
+          (recur))))
+    (Dataframe.
+     (map-vals series/make header->vals)
+     cols)))
+
+(defn map
+  [f ^Dataframe df]
+  (let [cols (.ordered-columns df)
+        n (count cols)
+        header->vals (map-from-keys
+                      (fn [_] (java.util.ArrayList. n))
+                      cols)
+        it (.iterator df)]
+    (loop []
+      (when (.hasNext it)
+        (let [row (f (.next it))]
+          (doseq [[k v] row]
+            (.add ^java.util.List (header->vals k) v))
+          (recur))))
+    (Dataframe.
+     (map-vals series/make header->vals)
+     cols)))
 
 (defn- read-raw-columns [header tail]
   (let [header->column (map-from-keys (fn [_] (transient [])) header)
         num-headers (count header)]
     (loop [tail tail header->column header->column]
       (if-let [row (first tail)]
-        (let [pairs (map util/->Pair header row)]
+        (let [pairs (clojure.core/map util/->Pair header row)]
           (when-not (= num-headers (count pairs))
             (throw (ex-info "Row has wrong number of elements"
                             {:header header :row row})))
@@ -122,7 +172,7 @@
    {:keys [column-fn]
     :or   {column-fn identity}}]
   (let [it (CsvParser/iterator (io/reader source))
-        headers (object-array (map column-fn (.next it)))
+        headers (object-array (clojure.core/map column-fn (.next it)))
         n (count headers)
         header->vals (map-from-keys
                       (fn [_] (java.util.ArrayList. n))
@@ -137,7 +187,7 @@
           (recur))))
     (Dataframe.
      (map-vals series/make header->vals)
-     headers)))
+     (into [] headers))))
 
 
 (defn as-numeric [^Dataframe df cols]
@@ -148,3 +198,18 @@
     (.column->series df)
     cols)
    (.ordered-columns df)))
+
+(defn range [^Dataframe df [start stop]]
+  (Dataframe.
+   (map-vals
+    (fn [s] (series/range s [start stop]))
+    (.column->series df))
+   (.ordered-columns ^Dataframe df)))
+
+(defn ->html [^Dataframe df]
+  [:table
+   [:tr (mapv (fn [c] [:th (str c)]) (.ordered-columns df))]
+   (mapv
+    (fn [row]
+      [:tr (mapv (fn [[_ v]] [:td v]) row)])
+    df)])

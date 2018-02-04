@@ -3,7 +3,10 @@
    (clojure.lang
     Indexed
     IPersistentCollection
-    Seqable)))
+    Seqable)
+   (java.util
+    Objects
+    Map$Entry)))
 
 (deftype Pair [x1 x2]
 
@@ -19,6 +22,10 @@
       (= idx 1) x2
       :else not-found))
 
+  Map$Entry
+  (getKey [_] x1)
+  (getValue [_] x2)
+
 
   IPersistentCollection
   (count [_] 2)
@@ -27,6 +34,13 @@
          (= x1 (.x1 ^Pair other))
          (= x2 (.x2 ^Pair other))))
 
+  Object
+  (equals [_ o]
+    (and (instance? Pair o)
+         (= x1 (.x1 ^Pair o))
+         (= x2 (.x2 ^Pair o))))
+  (hashCode [_]
+    (Objects/hash (object-array x1 x2)))
 
   Seqable
   (seq [_]

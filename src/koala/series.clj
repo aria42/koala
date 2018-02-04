@@ -1,7 +1,8 @@
 (ns koala.series
   (:refer-clojure :exclude [range map])
   (:require
-   [clojure.spec.alpha :as s])
+   [clojure.spec.alpha :as s]
+   [koala.series :as series])
   (:import
    (clojure.lang
     Counted
@@ -53,7 +54,9 @@
 
   Iterable
   (iterator [this]
-    (.iterator ^Iterable vals))
+    (if (instance? Iterable vals)
+      (.iterator ^Iterable vals)
+      (.iterator ^Iterable (seq vals))))
 
   InternalSeries
   (-dtype [this] dtype)
@@ -154,6 +157,9 @@
 
 (defn make [data & {:keys [dtype, index]}]
   (cond
+    (instance? koala.series.FullSeries data)
+    data
+
     ;; single object with index keys
     ;; will impose an ordering by sorting keys
     (s/valid? ::obj-series data)
@@ -213,3 +219,23 @@
 
 (defn has-index? [series]
   (-has-index? series))
+
+;;; Numerical Series
+
+(defn mean
+  "return mean of numeric series as a double"
+  ^double [s]
+  {:pre [(num-dtype? (-dtype s))]}
+  (/ (reduce + 0.0 s) (double (count s))))
+
+(defn normalize
+  "return new series with unit-normalized"
+  [s]
+  {:pre [(num-dtype? (-dtype s))]
+   :post [(num-dtype? (-dtype %))]}
+  (let [mu (mean s)
+        ss (reduce + 0.0 (map (fn [x] (* (- x mu) (- x mu))) s))
+        sigma (Math/sqrt (double (/ ss (dec (count s)))))]
+    (series/make
+     (clojure.core/map (fn [x] (/ (- x mu) sigma)) s)
+     :dtype :double)))
