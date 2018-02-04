@@ -35,20 +35,18 @@
   (entryAt [_ k]
     (.entryAt ^clojure.lang.Associative column->series k))
   (assoc [this k v]
-    (if (instance? Counted v)
-      (when (= (count this) (count v))
-        (throw (ex-info "New series data doesn't match data-frame length"
-                        {:new-column (count v)
-                         :existing-columns (count this)})))
-      (when-not (fn? v)
-        (throw (ex-info "assoc only takes fn or data for series/make"
-                        {:value v}))))
+    
     (let [v (if (fn? v)
               (clojure.core/map (fn [row] (v (into {} row))) (seq this))
-              v)]
+              v)
+          s (series/make v)]
+      (when-not (= (count this) (count s))
+        (throw (ex-info "New series data doesn't match data-frame length"
+                        {:new-column (count s)
+                         :existing-columns (count this)})))
       (Dataframe.
-       (assoc column->series k (series/make v))
-       (conj ordered-columns k))))
+       (assoc column->series k s)
+       (distinct (conj ordered-columns k)))))
 
   ILookup
   (valAt [_ k]
@@ -95,7 +93,7 @@
   (cond
 
     (map? data)
-    (Dataframe. (map-vals series/make data) nil)
+    (Dataframe. (map-vals series/make data) (sort (keys data)))
 
     (or (seq? data) (vector? data))
     (let [columns (vec (sort (set (mapcat keys data))))]

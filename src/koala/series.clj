@@ -225,14 +225,11 @@
 (defn mean
   "return mean of numeric series as a double"
   ^double [s]
-  {:pre [(num-dtype? (-dtype s))]}
   (/ (reduce + 0.0 s) (double (count s))))
 
-(defn normalize
+(defn unit-normalize
   "return new series with unit-normalized"
   [s]
-  {:pre [(num-dtype? (-dtype s))]
-   :post [(num-dtype? (-dtype %))]}
   (let [mu (mean s)
         ss (reduce + 0.0 (map (fn [x] (* (- x mu) (- x mu))) s))
         sigma (Math/sqrt (double (/ ss (dec (count s)))))]
