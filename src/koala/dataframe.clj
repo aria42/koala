@@ -204,10 +204,11 @@
     (.column->series df))
    (.ordered-columns ^Dataframe df)))
 
-(defn ->html [^Dataframe df]
-  [:table
-   [:tr (mapv (fn [c] [:th (str c)]) (.ordered-columns df))]
-   (mapv
-    (fn [row]
-      [:tr (mapv (fn [[_ v]] [:td v]) row)])
-    df)])
+(defn ->html [df]
+  (apply vector
+     :table
+     (apply vector :tr (mapv (fn [c] [:th (str c)]) (.ordered-columns df)))
+     (mapv
+      (fn [row]
+        (apply vector :tr (mapv (fn [[_ v]] [:td (pr-str v)]) row)))
+      df)))
